@@ -44,7 +44,8 @@ setTimeout(() => {
         env: {
             ...process.env,
             PORT: PORT,
-            NODE_ENV: 'production'
+            NODE_ENV: 'production',
+            BACKEND_PORT: BACKEND_PORT
         },
         stdio: 'inherit'
     });
