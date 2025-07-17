@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci && pip install --no-cache-dir --prefer-binary -r requirements_backend.txt && playwright install chromium && npm run build:web"
+buildCommand = "npm install && npm run build:web && pip install -r requirements_backend.txt && playwright install chromium"
 
 [deploy]
 startCommand = "npm run start:prod"
@@ -10,5 +10,4 @@ restartPolicyType = "on_failure"
 
 [variables]
 NODE_ENV = "production"
-PYTHONPATH = "/app"
-PIP_PREFER_BINARY = "1" 
+PYTHONPATH = "/app" 

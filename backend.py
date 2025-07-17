@@ -29,11 +29,11 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'bookfetcher_secret_key'
-CORS(app, origins=["*"])
+CORS(app, origins=["http://localhost:3000"])
 socketio = SocketIO(
     app, 
-    cors_allowed_origins="*",
-    async_mode='eventlet',
+    cors_allowed_origins="http://localhost:3000",
+    async_mode='threading',
     logger=True,
     engineio_logger=True
 )

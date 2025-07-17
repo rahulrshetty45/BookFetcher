@@ -1,9 +1,17 @@
 [phases.setup]
 nixPkgs = ["nodejs_18", "python39", "python39Packages.pip"]
 
-[start]
-cmd = "npm run start:prod"
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "npm ci",
+    "pip install -r requirements_backend.txt",
+    "playwright install --with-deps chromium"
+]
 
-[variables]
-NIXPACKS_NO_BUILD_CACHE = "1"
-PYTHONDONTWRITEBYTECODE = "1" 
+[phases.build]
+dependsOn = ["install"]
+cmds = ["npm run build:web"]
+
+[start]
+cmd = "npm run start:prod" 
