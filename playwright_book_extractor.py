@@ -288,13 +288,23 @@ async def extract_google_books_pages(preview_url: str, book_title: str, book_aut
                 await page.wait_for_timeout(5000)
                 
                 # Try to close any popups or accept cookies
-            try:
-                close_buttons = await page.query_selector_all('button:has-text("No thanks"), button:has-text("Got it"), button:has-text("Accept"), [aria-label*="close"], .modal-close')
-                for button in close_buttons[:2]:  # Close first 2 popups max
-                    await button.click()
-                    await page.wait_for_timeout(1000)
-            except:
-                pass
+                try:
+                    close_buttons = await page.query_selector_all('button:has-text("No thanks"), button:has-text("Got it"), button:has-text("Accept"), [aria-label*="close"], .modal-close')
+                    for button in close_buttons[:2]:  # Close first 2 popups max
+                        await button.click()
+                        await page.wait_for_timeout(1000)
+                except:
+                    pass
+                    
+            except Exception as navigation_error:
+                error_msg = f"Navigation failed: {str(navigation_error)}"
+                print(f"ERROR:{error_msg}")
+                print(f"❌ {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "pages_extracted": 0
+                }
             
             # Send screenshot after page loads
             await send_screenshot_update(page, 'navigation', '🌐 Google Books page loaded')
@@ -671,9 +681,27 @@ async def extract_google_books_pages(preview_url: str, book_title: str, book_aut
         }
     }
     
-    # Output result for backend communication
-    print(f"RESULT:{json.dumps(result)}")
-    return result
+            # Output result for backend communication
+            print(f"RESULT:{json.dumps(result)}")
+            return result
+            
+            finally:
+                await browser.close()
+                
+    except Exception as e:
+        error_msg = f"Critical automation error: {str(e)}"
+        print(f"ERROR:{error_msg}")
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        
+        result = {
+            "success": False,
+            "error": error_msg,
+            "pages_extracted": 0
+        }
+        print(f"RESULT:{json.dumps(result)}")
+        return result
 
 async def extract_text_from_image_async(image_path: str) -> dict:
     """Extract text from image using OCR with noise filtering - async version"""
