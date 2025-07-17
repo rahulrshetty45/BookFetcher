@@ -29,10 +29,18 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'bookfetcher_secret_key'
-CORS(app, origins=["http://localhost:3000"])
+
+# Configure CORS for both development and production
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:10000", 
+    "https://bookfetcher.onrender.com"
+]
+
+CORS(app, origins=cors_origins)
 socketio = SocketIO(
     app, 
-    cors_allowed_origins="http://localhost:3000",
+    cors_allowed_origins=cors_origins,
     async_mode='threading',
     logger=True,
     engineio_logger=True

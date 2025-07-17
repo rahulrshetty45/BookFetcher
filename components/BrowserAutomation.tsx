@@ -47,8 +47,9 @@ export default function BrowserAutomation({
 
     // Initialize socket connection
     const newSocket = io(getSocketUrl(), {
-      transports: ['websocket'],
-      upgrade: false
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      rememberUpgrade: true
     })
 
     setSocket(newSocket)

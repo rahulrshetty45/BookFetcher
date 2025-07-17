@@ -4,7 +4,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const PORT = process.env.PORT || 10000;
-const BACKEND_PORT = process.env.BACKEND_PORT || 5001;
+const BACKEND_PORT = 5001;
 
 console.log('🚀 Starting BookFetcher Production Server');
 console.log('=========================================');
