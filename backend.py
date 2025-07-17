@@ -346,6 +346,15 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
         # Use system python3 instead of virtual environment
         python_path = 'python3'
         
+        print(f"🎬 Starting Playwright script: {python_path} {script_path}")
+        print(f"📋 Arguments: {preview_url}, {book_title}, {book_author}")
+        
+        # Prepare environment variables
+        env = os.environ.copy()
+        env['PLAYWRIGHT_BROWSERS_PATH'] = '/opt/render/project/.playwright'
+        env['PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD'] = '0'
+        env['PYTHONUNBUFFERED'] = '1'
+        
         # Run the Playwright script with timeout
         process = subprocess.Popen(
             [python_path, script_path, preview_url, book_title, book_author],
@@ -353,29 +362,38 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
+            env=env
         )
         
         # Read output in real-time and update status
         result = None
+        stderr_output = []
         while True:
+            # Check for stdout
             output = process.stdout.readline()
             if output == '' and process.poll() is not None:
                 break
             if output:
                 line = output.strip()
+                print(f"📝 Script output: {line}")  # Log all output for debugging
+                
                 if line.startswith('PROGRESS:'):
                     try:
                         progress_data = json.loads(line.replace('PROGRESS:', ''))
+                        progress_description = progress_data.get('description', '')
+                        print(f"📈 Progress update: {progress_description}")
+                        
                         with automation_lock:
                             automation_status[automation_id].update({
-                                'progress': progress_data.get('description', ''),
+                                'progress': progress_description,
                                 'url': progress_data.get('url', preview_url)
                             })
                         if 'screenshot' in progress_data:
                             with automation_lock:
                                 automation_status[automation_id]['screenshot'] = progress_data['screenshot']
-                    except:
+                    except Exception as e:
+                        print(f"❌ Failed to parse PROGRESS line: {e}")
                         pass
                 elif line.startswith('RESULT:'):
                     try:
@@ -385,9 +403,35 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
                     except Exception as e:
                         print(f"❌ Failed to parse RESULT line: {e}")
                         pass
+                elif line.startswith('❌'):
+                    # Log errors from script
+                    print(f"🚨 Script error: {line}")
+                    with automation_lock:
+                        automation_status[automation_id].update({
+                            'progress': f"Script error: {line}"
+                        })
+                else:
+                    # Log other output for debugging
+                    print(f"📄 Script info: {line}")
+            
+            # Check for stderr
+            try:
+                stderr_line = process.stderr.readline()
+                if stderr_line:
+                    stderr_output.append(stderr_line.strip())
+                    print(f"⚠️ Script stderr: {stderr_line.strip()}")
+            except:
+                pass
         
-        # Wait for process to complete
-        stdout, stderr = process.communicate()
+        # Wait for process to complete and get remaining output
+        stdout_remaining, stderr_remaining = process.communicate()
+        
+        # Add any remaining stderr
+        if stderr_remaining:
+            stderr_output.append(stderr_remaining)
+            print(f"⚠️ Final script stderr: {stderr_remaining}")
+        
+        print(f"🏁 Playwright script completed with return code: {process.returncode}")
         
         if process.returncode == 0:
             # Automation completed successfully
@@ -399,16 +443,22 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
                 })
             print(f"✅ Playwright automation completed successfully")
         else:
-            error_msg = stderr or "Unknown error occurred"
+            # Combine all stderr for error message
+            error_msg = '\n'.join(stderr_output) if stderr_output else "Unknown error occurred"
+            print(f"❌ Playwright script failed with return code {process.returncode}")
+            print(f"❌ Error details: {error_msg}")
+            
             with automation_lock:
                 automation_status[automation_id].update({
                     'status': 'error',
-                    'error': f'Playwright automation failed: {error_msg}',
+                    'error': f'Playwright automation failed (code {process.returncode}): {error_msg}',
                     'failed_at': datetime.now().isoformat()
                 })
         
     except Exception as e:
         print(f"❌ Automation error: {str(e)}")
+        import traceback
+        print(f"❌ Full traceback: {traceback.format_exc()}")
         with automation_lock:
             automation_status[automation_id].update({
                 'status': 'error',
