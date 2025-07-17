@@ -19,10 +19,10 @@ export async function POST(request: NextRequest) {
     // Initialize status
     global.automationStatusStore.set(automationId, {
       status: 'running',
-      progress: null,
+      progress: 'Initializing automation...',
       result: null,
       error: null,
-      url: '',
+      url: previewUrl || '',
       screenshot: ''
     })
 
@@ -47,35 +47,78 @@ async function startBackgroundAutomation(
   params: { bookTitle: string, bookAuthor: string, genre: string, previewUrl: string }
 ) {
   try {
-    // Call the Python backend automation endpoint
-    const backendUrl = `http://localhost:${process.env.BACKEND_PORT || 5001}/start-automation`
-    
-    const response = await fetch(backendUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        automation_id: automationId,
-        ...params
-      })
+    // Update status to show we're connecting
+    global.automationStatusStore.set(automationId, {
+      ...global.automationStatusStore.get(automationId),
+      progress: 'Connecting to automation backend...'
     })
 
-    if (!response.ok) {
-      throw new Error(`Backend responded with status ${response.status}`)
+    // Call the Python backend automation endpoint with retry logic
+    const backendUrl = `http://localhost:${process.env.BACKEND_PORT || 5001}/start-automation`
+    
+    let lastError: Error | null = null
+    let response: Response | null = null
+    
+    // Retry connection up to 5 times with increasing delay
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        console.log(`🔄 Attempting to connect to backend (attempt ${attempt}/5)...`)
+        
+        response = await fetch(backendUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            automation_id: automationId,
+            ...params
+          }),
+          // Add timeout
+          signal: AbortSignal.timeout(10000) // 10 second timeout
+        })
+
+        if (response.ok) {
+          console.log('✅ Successfully connected to backend')
+          break
+        } else {
+          throw new Error(`Backend responded with status ${response.status}`)
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+        console.log(`❌ Backend connection attempt ${attempt} failed:`, lastError.message)
+        
+        if (attempt < 5) {
+          // Wait before retrying (exponential backoff)
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
+          console.log(`⏳ Waiting ${delay}ms before retry...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          
+          // Update status to show retry
+          global.automationStatusStore.set(automationId, {
+            ...global.automationStatusStore.get(automationId),
+            progress: `Retrying connection to backend (attempt ${attempt + 1}/5)...`
+          })
+        }
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw lastError || new Error('Failed to connect to backend after all retries')
     }
 
     const result = await response.json()
     
-    // Update status with final result
+    // Update status with success
     global.automationStatusStore.set(automationId, {
-      status: 'completed',
-      progress: null,
-      result: result,
+      status: 'running',
+      progress: 'Automation started successfully',
+      result: null,
       error: null,
-      url: result.final_url || '',
-      screenshot: result.final_screenshot || ''
+      url: params.previewUrl || '',
+      screenshot: ''
     })
+
+    console.log(`✅ Automation ${automationId} started successfully`)
 
   } catch (error) {
     console.error('Background automation error:', error)
@@ -112,7 +155,7 @@ export async function OPTIONS() {
     status: 200,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
   })

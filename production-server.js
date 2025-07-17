@@ -9,9 +9,16 @@ const BACKEND_PORT = 5001;
 console.log('🚀 Starting BookFetcher Production Server');
 console.log('=========================================');
 
+const childProcesses = [];
+
 // Function to cleanup on exit
 const cleanup = () => {
     console.log('🛑 Shutting down servers...');
+    childProcesses.forEach(proc => {
+        if (proc && !proc.killed) {
+            proc.kill('SIGTERM');
+        }
+    });
     process.exit();
 };
 
@@ -33,30 +40,50 @@ const backendProcess = spawn('python3', ['backend.py'], {
 
 backendProcess.on('error', (err) => {
     console.error('❌ Backend server error:', err);
+    process.exit(1);
 });
 
-// Wait a moment for backend to start
+backendProcess.on('exit', (code) => {
+    if (code !== 0) {
+        console.error(`❌ Backend server exited with code ${code}`);
+        process.exit(1);
+    }
+});
+
+childProcesses.push(backendProcess);
+
+// Wait for Python backend to fully start
+console.log('⏳ Waiting for Python backend to initialize...');
 setTimeout(() => {
-    console.log('🌐 Starting Next.js Frontend Server...');
-    
     // Start Next.js frontend
-    const frontendProcess = spawn('npm', ['run', 'start:web'], {
+    console.log('🌐 Starting Next.js Frontend Server...');
+    const frontendProcess = spawn('npx', ['next', 'start', '--port', PORT.toString()], {
         env: {
             ...process.env,
-            PORT: PORT,
-            NODE_ENV: 'production',
-            BACKEND_PORT: BACKEND_PORT
+            BACKEND_PORT: BACKEND_PORT.toString(),
+            PORT: PORT.toString()
         },
-        stdio: 'inherit'
+        stdio: 'inherit',
+        cwd: process.cwd()
     });
 
     frontendProcess.on('error', (err) => {
         console.error('❌ Frontend server error:', err);
+        process.exit(1);
     });
 
+    frontendProcess.on('exit', (code) => {
+        if (code !== 0) {
+            console.error(`❌ Frontend server exited with code ${code}`);
+            process.exit(1);
+        }
+    });
+
+    childProcesses.push(frontendProcess);
+    
     console.log(`✅ Servers started successfully!`);
     console.log(`📋 Server Information:`);
     console.log(`   🐍 Python Backend:  Port ${BACKEND_PORT}`);
     console.log(`   ⚛️  Next.js Frontend: Port ${PORT}`);
     
-}, 3000); 
+}, 3000); // Wait 3 seconds for Python backend to be ready 
