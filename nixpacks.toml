@@ -1,11 +1,11 @@
 [phases.setup]
-nixPkgs = ["nodejs_18", "python39", "python39Packages.pip"]
+nixPkgs = ["nodejs_18", "python39", "python39Packages.pip", "gcc", "pkg-config"]
 
 [phases.install]
 dependsOn = ["setup"]
 cmds = [
     "npm ci",
-    "pip install -r requirements_backend.txt",
+    "pip install --no-cache-dir --prefer-binary -r requirements_backend.txt",
     "playwright install --with-deps chromium"
 ]
 
@@ -14,4 +14,8 @@ dependsOn = ["install"]
 cmds = ["npm run build:web"]
 
 [start]
-cmd = "npm run start:prod" 
+cmd = "npm run start:prod"
+
+[variables]
+PIP_PREFER_BINARY = "1"
+PIP_NO_CACHE_DIR = "1" 
