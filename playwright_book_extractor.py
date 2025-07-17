@@ -198,59 +198,75 @@ async def send_screenshot_update(page, step_id: str, description: str):
             'status': 'running'
         })}")
 
-async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18):
+async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18) -> dict:
     """
-    Extract pages from Google Books preview using Playwright
-    
-    Args:
-        preview_url: Google Books preview URL
-        book_title: Title of the book
-        book_author: Author of the book
-        max_pages: Maximum number of pages to extract (default 18)
+    Extract pages from Google Books preview using Playwright automation.
     """
+    print("🚀 Starting extract_google_books_pages function")
+    print(f"📖 Book: {book_title} by {book_author}")
+    print(f"🔗 URL: {preview_url}")
+    print(f"📄 Max pages: {max_pages}")
     
     # Create screenshots directory
-    screenshots_dir = os.path.abspath("temp/screenshots")
+    screenshots_dir = os.path.join(os.getcwd(), 'temp', 'screenshots')
     os.makedirs(screenshots_dir, exist_ok=True)
-    
-    # Initialize list for parallel OCR tasks
-    ocr_tasks = []
+    print(f"📂 Screenshots directory created: {screenshots_dir}")
     
     print(f"PROGRESS:{json.dumps({'step_id': 'init', 'description': f'📂 Screenshots directory: {screenshots_dir}', 'status': 'completed'})}")
     print(f"PROGRESS:{json.dumps({'step_id': 'setup', 'description': f'📖 Extracting pages from: {book_title} by {book_author}', 'status': 'running'})}")
     print(f"PROGRESS:{json.dumps({'step_id': 'url', 'description': f'🔗 URL: {preview_url}', 'status': 'completed'})}")
-    
-    async with async_playwright() as p:
-        # Launch browser in headless mode to avoid separate window
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={'width': 1400, 'height': 1180},  # Maximum viewport height for complete content capture
-            device_scale_factor=2  # High DPI for better quality screenshots
-        )
-        page = await context.new_page()
-        
-        try:
+
+    try:
+        print("🎭 Initializing Playwright...")
+        async with async_playwright() as p:
+            print("🎭 Playwright context created")
+            
+            # Launch browser
+            print("🌐 Launching browser...")
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+            print("🌐 Browser launched successfully")
+            
             print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigating to Google Books preview...', 'status': 'running'})}")
-            await page.goto(preview_url, wait_until='networkidle')
             
-            # Wait for the page to load
-            await page.wait_for_timeout(5000)
+            page = await browser.new_page()
+            print("📄 New page created")
             
-            # Try to close any popups or accept cookies
+            # Set viewport
+            await page.set_viewport_size({"width": 1280, "height": 720})
+            print("📺 Viewport set to 1280x720")
+            
+            # Navigate to the URL
+            print(f"🔗 Navigating to: {preview_url}")
             try:
-                close_buttons = await page.query_selector_all('button:has-text("No thanks"), button:has-text("Got it"), button:has-text("Accept"), [aria-label*="close"], .modal-close')
-                for button in close_buttons[:2]:  # Close first 2 popups max
-                    await button.click()
-                    await page.wait_for_timeout(1000)
-            except:
-                pass
-            
-            # Send screenshot after page loads
-            await send_screenshot_update(page, 'navigation', '🌐 Google Books page loaded')
+                await page.goto(preview_url, wait_until="networkidle", timeout=30000)
+                print("✅ Navigation completed successfully")
+            except Exception as nav_error:
+                print(f"❌ Navigation failed: {nav_error}")
+                raise nav_error
             
             print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigation completed', 'status': 'completed'})}")
             print(f"PROGRESS:{json.dumps({'step_id': 'detection', 'description': '📚 Starting Google Books reader...', 'status': 'running'})}")
-            
+
+            # Wait for Google Books reader to load
+            print("⏳ Waiting for Google Books reader to load...")
+            try:
+                # Wait for book viewer
+                await page.wait_for_selector('[role="main"]', timeout=15000)
+                print("✅ Main content area found")
+                
+                # Look for embedded viewer
+                await page.wait_for_selector('iframe, .gb-viewer, [data-resource-type="books"]', timeout=10000)
+                print("✅ Book viewer elements detected")
+                
+            except Exception as load_error:
+                print(f"❌ Reader loading failed: {load_error}")
+                # Continue anyway, might still work
+                
+            print(f"PROGRESS:{json.dumps({'step_id': 'detection', 'description': '✅ Reader activated, waiting for content...', 'status': 'running'})}")
+
             # Try to activate the Google Books reader by clicking on preview elements
             try:
                 # Look for preview/read buttons or cover image to start the reader
