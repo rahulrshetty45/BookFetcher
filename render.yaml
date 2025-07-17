@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: bookfetcher
+    env: node
+    plan: free
+    buildCommand: |
+      npm ci &&
+      pip install --upgrade pip &&
+      pip install -r requirements_backend.txt &&
+      playwright install chromium &&
+      npm run build:web
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PIP_PREFER_BINARY
+        value: "1"
+    autoDeploy: true 
