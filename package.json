@@ -7,7 +7,8 @@
     "book-fetcher": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.cli.json",
+    "build": "npm run install:python && npm run build:web",
+    "install:python": "pip install --no-cache-dir --prefer-binary -r requirements_backend.txt && playwright install chromium",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "web": "next dev",

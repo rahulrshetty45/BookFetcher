@@ -1,21 +1,19 @@
-# Core Flask dependencies
+# Core Flask dependencies - minimal versions
 flask==3.0.0
 flask-cors==4.0.0
 flask-socketio==5.3.6
-python-socketio==5.11.0
 werkzeug==3.0.1
 
-# Utilities
+# Essential utilities
 python-dotenv==1.0.0
 requests==2.31.0
 pillow==10.1.0
 
-# AI/ML
+# AI
 openai==1.3.8
 
-# Browser automation - use latest stable
-browser-use==0.5.4
+# Browser automation - core only
 playwright==1.40.0
 
-# Async support (pre-built wheels available)
+# WebSocket support - lightweight
 eventlet==0.33.3 
