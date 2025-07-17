@@ -49,7 +49,9 @@ export default function BrowserAutomation({
     const newSocket = io(getSocketUrl(), {
       transports: ['polling', 'websocket'],
       upgrade: true,
-      rememberUpgrade: true
+      rememberUpgrade: true,
+      timeout: 20000,
+      forceNew: true
     })
 
     setSocket(newSocket)
