@@ -41,6 +41,11 @@ socketio = SocketIO(
 # Initialize OpenAI client
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
+@app.route('/', methods=['GET', 'HEAD'])
+def root():
+    """Root endpoint for Render health checks."""
+    return jsonify({"status": "BookFetcher Backend API", "version": "1.0.0"})
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""

@@ -3,8 +3,8 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-const PORT = process.env.PORT || 3000;
-const BACKEND_PORT = process.env.BACKEND_PORT || 5000;
+const PORT = process.env.PORT || 10000;
+const BACKEND_PORT = 5001;
 
 console.log('🚀 Starting BookFetcher Production Server');
 console.log('=========================================');
@@ -43,7 +43,8 @@ setTimeout(() => {
     const frontendProcess = spawn('npm', ['run', 'start:web'], {
         env: {
             ...process.env,
-            PORT: PORT
+            PORT: PORT,
+            NODE_ENV: 'production'
         },
         stdio: 'inherit'
     });
