@@ -14,10 +14,12 @@ from urllib.parse import quote
 from io import BytesIO
 import tempfile
 import requests
+import threading
+import time
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit
+# Socket.io removed - using HTTP polling instead
 from dotenv import load_dotenv
 import openai
 from openai import OpenAI
@@ -38,13 +40,10 @@ cors_origins = [
 ]
 
 CORS(app, origins=cors_origins)
-socketio = SocketIO(
-    app, 
-    cors_allowed_origins=cors_origins,
-    async_mode='threading',
-    logger=True,
-    engineio_logger=True
-)
+
+# In-memory storage for automation status (use Redis in production)
+automation_status = {}
+automation_lock = threading.Lock()
 
 # Initialize OpenAI client
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -260,8 +259,164 @@ Example format:
         print(f"❌ Error generating book facts: {e}")
         return jsonify({'error': f'Failed to generate facts: {str(e)}'}), 500
 
-@socketio.on('start_automation')
-def handle_automation(data):
+@app.route('/start-automation', methods=['POST'])
+def start_automation():
+    """Start browser automation and return automation ID."""
+    try:
+        data = request.get_json()
+        automation_id = data.get('automation_id')
+        book_title = data.get('bookTitle', '')
+        book_author = data.get('bookAuthor', '')
+        genre = data.get('genre', 'Unknown')
+        preview_url = data.get('previewUrl', '')
+        
+        if not automation_id:
+            return jsonify({'error': 'automation_id is required'}), 400
+        
+        if not book_title or not book_author:
+            return jsonify({'error': 'Book title and author are required'}), 400
+        
+        if not preview_url:
+            return jsonify({'error': 'Preview URL is required'}), 400
+        
+        # Initialize automation status
+        with automation_lock:
+            automation_status[automation_id] = {
+                'status': 'running',
+                'progress': None,
+                'result': None,
+                'error': None,
+                'url': preview_url,
+                'screenshot': '',
+                'started_at': datetime.now().isoformat()
+            }
+        
+        print(f"🚀 Starting automation for: {book_title} by {book_author} with preview URL: {preview_url}")
+        
+        # Start automation in background thread
+        thread = threading.Thread(
+            target=run_browser_automation_http,
+            args=(automation_id, book_title, book_author, preview_url)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'automation_id': automation_id,
+            'status': 'started',
+            'message': f'Automation started for {book_title} by {book_author}'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error starting automation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/automation-status/<automation_id>', methods=['GET'])
+def get_automation_status(automation_id):
+    """Get current automation status."""
+    try:
+        with automation_lock:
+            status = automation_status.get(automation_id)
+        
+        if not status:
+            return jsonify({'error': 'Automation not found'}), 404
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        print(f"❌ Error getting automation status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+def run_browser_automation_http(automation_id: str, book_title: str, book_author: str, preview_url: str):
+    """Run Playwright automation and update status."""
+    import subprocess
+    import os
+    
+    try:
+        # Update status
+        with automation_lock:
+            automation_status[automation_id].update({
+                'status': 'running',
+                'progress': f'📖 Starting Playwright automation for: {book_title}',
+                'url': preview_url
+            })
+        
+        # Run the Playwright script
+        script_path = os.path.join(os.getcwd(), 'playwright_book_extractor.py')
+        python_path = os.path.join(os.getcwd(), 'browser_env', 'bin', 'python')
+        
+        # Run the Playwright script with timeout
+        process = subprocess.Popen(
+            [python_path, script_path, preview_url, book_title, book_author],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Read output in real-time and update status
+        result = None
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                line = output.strip()
+                if line.startswith('PROGRESS:'):
+                    try:
+                        progress_data = json.loads(line.replace('PROGRESS:', ''))
+                        with automation_lock:
+                            automation_status[automation_id].update({
+                                'progress': progress_data.get('description', ''),
+                                'url': progress_data.get('url', preview_url)
+                            })
+                        if 'screenshot' in progress_data:
+                            with automation_lock:
+                                automation_status[automation_id]['screenshot'] = progress_data['screenshot']
+                    except:
+                        pass
+                elif line.startswith('RESULT:'):
+                    try:
+                        result_text = line.replace('RESULT:', '')
+                        result = json.loads(result_text)
+                        print(f"✅ Captured GPT-4 analysis result: {len(result_text)} characters")
+                    except Exception as e:
+                        print(f"❌ Failed to parse RESULT line: {e}")
+                        pass
+        
+        # Wait for process to complete
+        stdout, stderr = process.communicate()
+        
+        if process.returncode == 0:
+            # Automation completed successfully
+            with automation_lock:
+                automation_status[automation_id].update({
+                    'status': 'completed',
+                    'result': result,
+                    'completed_at': datetime.now().isoformat()
+                })
+            print(f"✅ Playwright automation completed successfully")
+        else:
+            error_msg = stderr or "Unknown error occurred"
+            with automation_lock:
+                automation_status[automation_id].update({
+                    'status': 'error',
+                    'error': f'Playwright automation failed: {error_msg}',
+                    'failed_at': datetime.now().isoformat()
+                })
+        
+    except Exception as e:
+        print(f"❌ Automation error: {str(e)}")
+        with automation_lock:
+            automation_status[automation_id].update({
+                'status': 'error',
+                'error': str(e),
+                'failed_at': datetime.now().isoformat()
+            })
+
+# @socketio.on('start_automation')  # Commented out - now using HTTP endpoints
+def handle_automation_old(data):
     """Handle browser automation request via WebSocket."""
     try:
         book_title = data.get('bookTitle', '')
@@ -869,4 +1024,4 @@ if __name__ == '__main__':
     if not os.getenv('OPENAI_API_KEY'):
         print("⚠️  Warning: OPENAI_API_KEY not found in environment")
     
-    socketio.run(app, host='0.0.0.0', port=port, debug=debug_mode, allow_unsafe_werkzeug=True) 
+    app.run(host='0.0.0.0', port=port, debug=debug_mode) 
