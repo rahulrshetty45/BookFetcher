@@ -331,7 +331,6 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
     """Run Playwright automation and update status."""
     import subprocess
     import os
-    import signal
     
     try:
         # Update status
@@ -347,10 +346,6 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
         # Use system python3 instead of virtual environment
         python_path = 'python3'
         
-        print(f"🚀 Starting Playwright process: {python_path} {script_path}")
-        print(f"📖 Book: {book_title} by {book_author}")
-        print(f"🔗 URL: {preview_url}")
-        
         # Run the Playwright script with timeout
         process = subprocess.Popen(
             [python_path, script_path, preview_url, book_title, book_author],
@@ -358,44 +353,17 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            universal_newlines=True,
-            preexec_fn=os.setsid  # Create new process group for timeout handling
+            universal_newlines=True
         )
-        
-        # Update status to show process started
-        with automation_lock:
-            automation_status[automation_id].update({
-                'progress': f'🤖 Playwright process started (PID: {process.pid})',
-            })
         
         # Read output in real-time and update status
         result = None
-        timeout_counter = 0
-        max_timeout = 300  # 5 minutes in seconds
-        
         while True:
             output = process.stdout.readline()
-            
-            # Check for timeout
-            timeout_counter += 1
-            if timeout_counter > max_timeout:
-                print(f"⏰ Automation {automation_id} timed out after {max_timeout} seconds")
-                # Kill the entire process group
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                with automation_lock:
-                    automation_status[automation_id].update({
-                        'status': 'error',
-                        'error': f'Automation timed out after {max_timeout} seconds',
-                        'failed_at': datetime.now().isoformat()
-                    })
-                return
-            
             if output == '' and process.poll() is not None:
                 break
             if output:
                 line = output.strip()
-                print(f"📤 Playwright output: {line[:100]}...")  # Log first 100 chars
-                
                 if line.startswith('PROGRESS:'):
                     try:
                         progress_data = json.loads(line.replace('PROGRESS:', ''))
@@ -404,43 +372,22 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
                                 'progress': progress_data.get('description', ''),
                                 'url': progress_data.get('url', preview_url)
                             })
-                        print(f"📈 Progress update: {progress_data.get('description', '')}")
                         if 'screenshot' in progress_data:
                             with automation_lock:
                                 automation_status[automation_id]['screenshot'] = progress_data['screenshot']
-                        timeout_counter = 0  # Reset timeout on activity
-                    except Exception as e:
-                        print(f"❌ Failed to parse progress: {e}")
+                    except:
                         pass
                 elif line.startswith('RESULT:'):
                     try:
                         result_text = line.replace('RESULT:', '')
                         result = json.loads(result_text)
                         print(f"✅ Captured GPT-4 analysis result: {len(result_text)} characters")
-                        timeout_counter = 0  # Reset timeout on activity
                     except Exception as e:
                         print(f"❌ Failed to parse RESULT line: {e}")
-                        print(f"Raw line: {repr(line)}")
                         pass
-                elif line.startswith('ERROR:'):
-                    error_msg = line.replace('ERROR:', '')
-                    print(f"❌ Playwright error: {error_msg}")
-                    with automation_lock:
-                        automation_status[automation_id].update({
-                            'status': 'error',
-                            'error': error_msg,
-                            'failed_at': datetime.now().isoformat()
-                        })
-                    return
-            else:
-                # Small delay when no output to prevent busy waiting
-                time.sleep(1)
         
         # Wait for process to complete
         stdout, stderr = process.communicate()
-        
-        if stderr:
-            print(f"🔍 Playwright stderr: {stderr}")
         
         if process.returncode == 0:
             # Automation completed successfully
@@ -452,8 +399,7 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
                 })
             print(f"✅ Playwright automation completed successfully")
         else:
-            error_msg = stderr or f"Process exited with code {process.returncode}"
-            print(f"❌ Playwright automation failed: {error_msg}")
+            error_msg = stderr or "Unknown error occurred"
             with automation_lock:
                 automation_status[automation_id].update({
                     'status': 'error',
@@ -463,8 +409,6 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
         
     except Exception as e:
         print(f"❌ Automation error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         with automation_lock:
             automation_status[automation_id].update({
                 'status': 'error',

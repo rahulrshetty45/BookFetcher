@@ -50,22 +50,25 @@ export default function BrowserAutomation({
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isStartingRef = useRef(false) // Prevent multiple simultaneous starts
 
   useEffect(() => {
-    if (!isVisible) return
-
-    // Reset automation state when component becomes visible
-    setAutomationId(null)
-    setHasStartedAutomation(false)
-    setIsAutomating(false)
-    setAutomationResult(null)
-    setSelectedPageContent(null)
-    setCurrentUrl('')
-    setCurrentScreenshot('')
-    
-    // Clear any existing polling
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
+    if (!isVisible) {
+      // Reset all state when component becomes invisible
+      setIsConnected(false)
+      setHasStartedAutomation(false)
+      setIsAutomating(false)
+      setAutomationId(null)
+      setAutomationResult(null)
+      setCurrentUrl('')
+      setCurrentScreenshot('')
+      isStartingRef.current = false
+      
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      return
     }
 
     // Simulate connection for UI
@@ -75,22 +78,37 @@ export default function BrowserAutomation({
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
       }
     }
   }, [isVisible])
 
   useEffect(() => {
-    if (isConnected && previewUrl && !hasStartedAutomation) {
+    // Only start automation if we have all required data and haven't started yet
+    if (isConnected && previewUrl && !hasStartedAutomation && !isStartingRef.current) {
       console.log('🚀 Starting automation with preview URL:', previewUrl)
       setHasStartedAutomation(true)
       setIsAutomating(true)
       startAutomation()
     }
-  }, [isConnected, previewUrl, bookTitle, bookAuthor, genre, hasStartedAutomation])
+  }, [isConnected, previewUrl, hasStartedAutomation]) // Removed dynamic dependencies
 
   const startAutomation = async () => {
+    if (isStartingRef.current) {
+      console.log('⚠️ Automation already starting, skipping...')
+      return
+    }
+
+    isStartingRef.current = true
+
     try {
-      console.log('📡 Calling browser automation API...')
+      // Clear any existing polling
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+
+      console.log('🔄 Starting new automation...')
       const response = await fetch(getApiUrl('browser-automation'), {
         method: 'POST',
         headers: {
@@ -109,11 +127,11 @@ export default function BrowserAutomation({
       }
 
       const result = await response.json()
-      console.log('📡 Backend response:', result)
+      console.log('✅ Automation response:', result)
       
       if (result.automation_id) {
-        console.log(`🔄 Starting polling for automation: ${result.automation_id}`)
         setAutomationId(result.automation_id)
+        console.log('📋 Starting polling for automation ID:', result.automation_id)
         startPolling(result.automation_id)
       } else {
         // If automation completes immediately
@@ -122,32 +140,31 @@ export default function BrowserAutomation({
     } catch (error) {
       console.error('❌ Automation start error:', error)
       handleErrorEvent({ error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      isStartingRef.current = false
     }
   }
 
-  const startPolling = (automationId: string) => {
-    // Clear any existing polling
+  const startPolling = (pollingAutomationId: string) => {
+    // Clear any existing polling first
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current)
     }
 
-    console.log(`🔄 Starting polling for automation: ${automationId}`)
+    console.log('🔍 Starting polling for automation ID:', pollingAutomationId)
     
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const response = await fetch(getApiUrl(`automation-status/${automationId}`))
+        console.log('📡 Polling automation status for ID:', pollingAutomationId)
+        const response = await fetch(getApiUrl(`automation-status/${pollingAutomationId}`))
         
         if (!response.ok) {
-          console.log(`⚠️ Polling failed: ${response.status} for ${automationId}`)
+          console.log(`❌ Polling failed with status ${response.status} for ID:`, pollingAutomationId)
           return
         }
 
         const status: AutomationStatus = await response.json()
-        console.log(`📊 Status for ${automationId}:`, status)
-        
-        if (status.progress) {
-          console.log(`📈 Progress: ${status.progress}`)
-        }
+        console.log('📊 Automation status:', status)
         
         if (status.url) {
           setCurrentUrl(status.url)
@@ -158,27 +175,20 @@ export default function BrowserAutomation({
         }
 
         if (status.status === 'completed') {
-          console.log(`✅ Automation ${automationId} completed`)
+          console.log('✅ Automation completed!')
           clearInterval(pollingIntervalRef.current!)
+          pollingIntervalRef.current = null
           handleCompletionEvent(status.result)
         } else if (status.status === 'error') {
-          console.log(`❌ Automation ${automationId} failed: ${status.error}`)
+          console.log('❌ Automation failed:', status.error)
           clearInterval(pollingIntervalRef.current!)
+          pollingIntervalRef.current = null
           handleErrorEvent({ error: status.error })
         }
       } catch (error) {
         console.error('Polling error:', error)
       }
     }, 2000) // Poll every 2 seconds
-    
-    // Add timeout after 5 minutes
-    setTimeout(() => {
-      if (pollingIntervalRef.current) {
-        console.log(`⏰ Automation ${automationId} timed out after 5 minutes`)
-        clearInterval(pollingIntervalRef.current!)
-        handleErrorEvent({ error: 'Automation timed out after 5 minutes' })
-      }
-    }, 300000)
   }
 
   const handleProgressEvent = (event: any) => {
