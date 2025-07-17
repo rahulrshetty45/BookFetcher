@@ -2,15 +2,14 @@
 const isDevelopment = process.env.NODE_ENV === 'development'
 const isClient = typeof window !== 'undefined'
 
-// In production on Render, backend runs on port 5001, frontend on main port
-// In development, backend runs on localhost:5000
+// In production, use Next.js API routes; in development, use direct backend
 export const API_BASE_URL = isDevelopment 
   ? 'http://localhost:5000'
-  : (isClient ? `${window.location.protocol}//${window.location.hostname}:5001` : 'http://localhost:5001')
+  : (isClient ? `${window.location.origin}/api` : '/api')
 
 export const SOCKET_URL = isDevelopment
   ? 'http://localhost:5000'
-  : (isClient ? `${window.location.protocol}//${window.location.hostname}:5001` : 'http://localhost:5001')
+  : (isClient ? window.location.origin : '')
 
 // Helper function to get full API URL
 export const getApiUrl = (endpoint: string) => {
