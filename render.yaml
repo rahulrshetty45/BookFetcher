@@ -1,15 +1,15 @@
 services:
   - type: web
     name: bookfetcher
-    env: node
+    runtime: node
     plan: free
     buildCommand: |
       npm ci &&
-      pip install --upgrade pip &&
-      pip install -r requirements_backend.txt &&
-      playwright install chromium &&
+      python3 -m pip install --upgrade pip &&
+      python3 -m pip install --no-cache-dir --prefer-binary -r requirements_backend.txt &&
+      npx playwright install chromium &&
       npm run build:web
-    startCommand: npm run start:prod
+    startCommand: node production-server.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -17,4 +17,6 @@ services:
         value: /opt/render/project/src
       - key: PIP_PREFER_BINARY
         value: "1"
+      - key: OPENAI_API_KEY
+        sync: false
     autoDeploy: true 
