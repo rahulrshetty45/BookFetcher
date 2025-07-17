@@ -11,7 +11,6 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 import json
 from datetime import datetime
-import pytesseract
 from PIL import Image
 import openai
 from dotenv import load_dotenv
@@ -22,11 +21,25 @@ from typing import Dict, List, Optional
 # Load environment variables
 load_dotenv()
 
+# Try to import pytesseract, provide fallback if not available
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+    print("✅ Tesseract OCR is available")
+except ImportError as e:
+    TESSERACT_AVAILABLE = False
+    print(f"⚠️ Tesseract OCR not available: {e}")
+    print("📝 Will proceed without OCR functionality")
+
 # Initialize OpenAI client
 openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 def extract_text_from_image(image_path: str) -> str:
     """Extract text from image using OCR with noise filtering"""
+    if not TESSERACT_AVAILABLE:
+        print(f"⚠️ OCR not available for {image_path}, skipping text extraction")
+        return ""
+    
     try:
         image = Image.open(image_path)
         text = pytesseract.image_to_string(image)
@@ -613,6 +626,19 @@ async def extract_google_books_pages(preview_url: str, book_title: str, book_aut
 
 async def extract_text_from_image_async(image_path: str) -> dict:
     """Extract text from image using OCR with noise filtering - async version"""
+    # Extract page number from filename
+    filename = os.path.basename(image_path)
+    page_num = int(filename.split('_')[1].split('.')[0])
+    
+    if not TESSERACT_AVAILABLE:
+        print(f"⚠️ OCR not available for {image_path}, returning empty text")
+        return {
+            "page_number": page_num,
+            "filename": filename,
+            "text": "",
+            "text_length": 0
+        }
+    
     loop = asyncio.get_event_loop()
     
     def run_ocr():
@@ -628,10 +654,6 @@ async def extract_text_from_image_async(image_path: str) -> dict:
     # Run OCR in thread pool to avoid blocking
     with concurrent.futures.ThreadPoolExecutor() as executor:
         text = await loop.run_in_executor(executor, run_ocr)
-    
-    # Extract page number from filename
-    filename = os.path.basename(image_path)
-    page_num = int(filename.split('_')[1].split('.')[0])
     
     return {
         "page_number": page_num,

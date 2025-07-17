@@ -15,6 +15,21 @@ npm install
 echo "🔨 Building Next.js application..."
 npm run build:web
 
+# Install system dependencies for OCR  
+echo "🔧 Installing system dependencies..."
+# Try installing Tesseract without sudo (Render may have it pre-installed)
+which tesseract || echo "⚠️ Tesseract not found in PATH, trying alternative installation..."
+
+# Try installing via system package manager (may work on Render)
+apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng 2>/dev/null || echo "⚠️ System Tesseract install skipped (permissions/availability)"
+
+# Alternative: Install tesseract via conda/mamba if available
+if command -v conda &> /dev/null; then
+    conda install -c conda-forge tesseract -y || echo "⚠️ Conda tesseract install skipped"
+elif command -v mamba &> /dev/null; then
+    mamba install -c conda-forge tesseract -y || echo "⚠️ Mamba tesseract install skipped"
+fi
+
 # Install Python dependencies
 echo "🐍 Installing Python dependencies..."
 if command -v python3 &> /dev/null; then
