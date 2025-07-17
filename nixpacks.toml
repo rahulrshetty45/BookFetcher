@@ -1,0 +1,17 @@
+[phases.setup]
+nixPkgs = ["nodejs_18", "python39", "python39Packages.pip"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "npm ci",
+    "pip install -r requirements_backend.txt",
+    "playwright install --with-deps chromium"
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = ["npm run build:web"]
+
+[start]
+cmd = "npm run start:prod" 
