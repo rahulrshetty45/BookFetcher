@@ -13,7 +13,8 @@
     "web": "next dev",
     "build:web": "next build",
     "start:web": "next start",
-    "start:prod": "node production-server.js"
+    "start:prod": "node production-server.js",
+    "render-build": "./render-build.sh"
   },
   "keywords": [
     "book",
