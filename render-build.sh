@@ -13,14 +13,22 @@ npm run build:web
 
 # Install Python dependencies
 echo "🐍 Installing Python dependencies..."
-pip install -r requirements_backend.txt
+if command -v python3 &> /dev/null; then
+    python3 -m pip install --upgrade pip
+    python3 -m pip install -r requirements_backend.txt
+else
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements_backend.txt
+fi
 
 # Install Playwright with chromium browser
 echo "🌐 Installing Playwright browser..."
-playwright install chromium
-
-# Install additional system dependencies that Playwright might need
-echo "📚 Installing system dependencies..."
-playwright install-deps chromium
+if command -v python3 &> /dev/null; then
+    python3 -m playwright install chromium
+    python3 -m playwright install-deps chromium
+else
+    python -m playwright install chromium
+    python -m playwright install-deps chromium
+fi
 
 echo "✅ Build completed successfully!" 

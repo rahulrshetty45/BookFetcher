@@ -21,13 +21,14 @@ process.on('SIGTERM', cleanup);
 
 // Start Python backend
 console.log('📡 Starting Python Backend Server...');
-const backendProcess = spawn('python', ['backend.py'], {
+const backendProcess = spawn('python3', ['backend.py'], {
     env: {
         ...process.env,
         FLASK_PORT: BACKEND_PORT,
         PYTHONUNBUFFERED: '1'
     },
-    stdio: 'inherit'
+    stdio: 'inherit',
+    cwd: process.cwd()
 });
 
 backendProcess.on('error', (err) => {

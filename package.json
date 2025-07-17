@@ -7,7 +7,8 @@
     "book-fetcher": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.cli.json",
+    "build": "./render-build.sh",
+    "build:cli": "tsc -p tsconfig.cli.json",
     "start": "node production-server.js",
     "start:cli": "node dist/index.js",
     "dev": "tsc --watch",
