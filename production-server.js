@@ -32,7 +32,10 @@ const backendProcess = spawn('python3', ['backend.py'], {
     env: {
         ...process.env,
         FLASK_PORT: BACKEND_PORT,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        // Playwright browser configuration
+        PLAYWRIGHT_BROWSERS_PATH: '/opt/render/project/.playwright',
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0'
     },
     stdio: 'inherit',
     cwd: process.cwd()

@@ -343,7 +343,8 @@ def run_browser_automation_http(automation_id: str, book_title: str, book_author
         
         # Run the Playwright script
         script_path = os.path.join(os.getcwd(), 'playwright_book_extractor.py')
-        python_path = os.path.join(os.getcwd(), 'browser_env', 'bin', 'python')
+        # Use system python3 instead of virtual environment
+        python_path = 'python3'
         
         # Run the Playwright script with timeout
         process = subprocess.Popen(
@@ -462,7 +463,8 @@ def run_browser_automation(book_title: str, book_author: str, preview_url: str =
         
         # Run the Playwright script
         script_path = os.path.join(os.getcwd(), 'playwright_book_extractor.py')
-        python_path = os.path.join(os.getcwd(), 'browser_env', 'bin', 'python')
+        # Use system python3 instead of virtual environment  
+        python_path = 'python3'
         
         try:
             # Run the Playwright script with timeout
