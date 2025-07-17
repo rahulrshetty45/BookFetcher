@@ -1,3 +1,7 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm ci && pip install --no-cache-dir --prefer-binary -r requirements_backend.txt && playwright install chromium && npm run build:web"
+
 [deploy]
 startCommand = "npm run start:prod"
 healthcheckPath = "/"

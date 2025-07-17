@@ -1,0 +1,9 @@
+[phases.setup]
+nixPkgs = ["nodejs_18", "python39", "python39Packages.pip"]
+
+[start]
+cmd = "npm run start:prod"
+
+[variables]
+NIXPACKS_NO_BUILD_CACHE = "1"
+PYTHONDONTWRITEBYTECODE = "1" 
