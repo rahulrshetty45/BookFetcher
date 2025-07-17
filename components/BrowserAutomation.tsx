@@ -54,6 +54,20 @@ export default function BrowserAutomation({
   useEffect(() => {
     if (!isVisible) return
 
+    // Reset automation state when component becomes visible
+    setAutomationId(null)
+    setHasStartedAutomation(false)
+    setIsAutomating(false)
+    setAutomationResult(null)
+    setSelectedPageContent(null)
+    setCurrentUrl('')
+    setCurrentScreenshot('')
+    
+    // Clear any existing polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+    }
+
     // Simulate connection for UI
     setIsConnected(true)
     console.log('✅ Connected to backend')
@@ -76,6 +90,7 @@ export default function BrowserAutomation({
 
   const startAutomation = async () => {
     try {
+      console.log('📡 Calling browser automation API...')
       const response = await fetch(getApiUrl('browser-automation'), {
         method: 'POST',
         headers: {
@@ -94,8 +109,10 @@ export default function BrowserAutomation({
       }
 
       const result = await response.json()
+      console.log('📡 Backend response:', result)
       
       if (result.automation_id) {
+        console.log(`🔄 Starting polling for automation: ${result.automation_id}`)
         setAutomationId(result.automation_id)
         startPolling(result.automation_id)
       } else {
@@ -109,12 +126,28 @@ export default function BrowserAutomation({
   }
 
   const startPolling = (automationId: string) => {
+    // Clear any existing polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+    }
+
+    console.log(`🔄 Starting polling for automation: ${automationId}`)
+    
     pollingIntervalRef.current = setInterval(async () => {
       try {
         const response = await fetch(getApiUrl(`automation-status/${automationId}`))
-        if (!response.ok) return
+        
+        if (!response.ok) {
+          console.log(`⚠️ Polling failed: ${response.status} for ${automationId}`)
+          return
+        }
 
         const status: AutomationStatus = await response.json()
+        console.log(`📊 Status for ${automationId}:`, status)
+        
+        if (status.progress) {
+          console.log(`📈 Progress: ${status.progress}`)
+        }
         
         if (status.url) {
           setCurrentUrl(status.url)
@@ -125,9 +158,11 @@ export default function BrowserAutomation({
         }
 
         if (status.status === 'completed') {
+          console.log(`✅ Automation ${automationId} completed`)
           clearInterval(pollingIntervalRef.current!)
           handleCompletionEvent(status.result)
         } else if (status.status === 'error') {
+          console.log(`❌ Automation ${automationId} failed: ${status.error}`)
           clearInterval(pollingIntervalRef.current!)
           handleErrorEvent({ error: status.error })
         }
@@ -135,6 +170,15 @@ export default function BrowserAutomation({
         console.error('Polling error:', error)
       }
     }, 2000) // Poll every 2 seconds
+    
+    // Add timeout after 5 minutes
+    setTimeout(() => {
+      if (pollingIntervalRef.current) {
+        console.log(`⏰ Automation ${automationId} timed out after 5 minutes`)
+        clearInterval(pollingIntervalRef.current!)
+        handleErrorEvent({ error: 'Automation timed out after 5 minutes' })
+      }
+    }, 300000)
   }
 
   const handleProgressEvent = (event: any) => {

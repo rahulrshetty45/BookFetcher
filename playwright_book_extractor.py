@@ -185,45 +185,109 @@ async def send_screenshot_update(page, step_id: str, description: str):
             'status': 'running'
         })}")
 
-async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18):
-    """
-    Extract pages from Google Books preview using Playwright
-    
-    Args:
-        preview_url: Google Books preview URL
-        book_title: Title of the book
-        book_author: Author of the book
-        max_pages: Maximum number of pages to extract (default 18)
-    """
-    
-    # Create screenshots directory
-    screenshots_dir = os.path.abspath("temp/screenshots")
-    os.makedirs(screenshots_dir, exist_ok=True)
-    
-    # Initialize list for parallel OCR tasks
-    ocr_tasks = []
-    
-    print(f"PROGRESS:{json.dumps({'step_id': 'init', 'description': f'📂 Screenshots directory: {screenshots_dir}', 'status': 'completed'})}")
-    print(f"PROGRESS:{json.dumps({'step_id': 'setup', 'description': f'📖 Extracting pages from: {book_title} by {book_author}', 'status': 'running'})}")
-    print(f"PROGRESS:{json.dumps({'step_id': 'url', 'description': f'🔗 URL: {preview_url}', 'status': 'completed'})}")
-    
-    async with async_playwright() as p:
-        # Launch browser in headless mode to avoid separate window
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={'width': 1400, 'height': 1180},  # Maximum viewport height for complete content capture
-            device_scale_factor=2  # High DPI for better quality screenshots
-        )
-        page = await context.new_page()
+async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18) -> dict:
+    """Extract pages from Google Books preview using Playwright"""
+    try:
+        print(f"PROGRESS:{json.dumps({
+            'step_id': 'init', 
+            'description': f'🚀 Starting Playwright automation for: {book_title}', 
+            'status': 'running',
+            'url': preview_url
+        })}")
         
-        try:
-            print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigating to Google Books preview...', 'status': 'running'})}")
-            await page.goto(preview_url, wait_until='networkidle')
+        print(f"PROGRESS:{json.dumps({
+            'step_id': 'browser_init', 
+            'description': '🌐 Initializing browser...', 
+            'status': 'running'
+        })}")
+        
+        # Check if running in production environment
+        is_production = os.getenv('NODE_ENV') == 'production'
+        browser_path = os.getenv('PLAYWRIGHT_BROWSERS_PATH', '/opt/render/project/.playwright')
+        
+        print(f"🔧 Environment: {'production' if is_production else 'development'}")
+        print(f"🗂️ Browser path: {browser_path}")
+        print(f"📁 Current directory: {os.getcwd()}")
+        
+        async with async_playwright() as p:
+            try:
+                # Browser launch options for production
+                launch_options = {
+                    'headless': True,
+                    'args': [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--single-process',
+                        '--disable-gpu'
+                    ]
+                }
+                
+                if is_production:
+                    # In production, specify the browser executable if needed
+                    chromium_path = os.path.join(browser_path, 'chromium-1091/chrome-linux/chrome')
+                    if os.path.exists(chromium_path):
+                        launch_options['executable_path'] = chromium_path
+                        print(f"🌐 Using Chromium at: {chromium_path}")
+                    else:
+                        print(f"⚠️ Chromium not found at {chromium_path}, using default")
+                
+                print(f"PROGRESS:{json.dumps({
+                    'step_id': 'browser_launch', 
+                    'description': '🚀 Launching browser...', 
+                    'status': 'running'
+                })}")
+                
+                browser = await p.chromium.launch(**launch_options)
+                print(f"✅ Browser launched successfully")
+                
+                print(f"PROGRESS:{json.dumps({
+                    'step_id': 'browser_ready', 
+                    'description': '✅ Browser ready, creating page...', 
+                    'status': 'running'
+                })}")
+                
+                page = await browser.new_page()
+                print(f"✅ New page created")
+                
+                # Set viewport and user agent
+                await page.set_viewport_size({"width": 1280, "height": 720})
+                await page.set_extra_http_headers({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                })
+                
+            except Exception as browser_error:
+                error_msg = f"Browser launch failed: {str(browser_error)}"
+                print(f"ERROR:{error_msg}")
+                print(f"❌ {error_msg}")
+                import traceback
+                traceback.print_exc()
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "pages_extracted": 0
+                }
+
+            # Create screenshots directory
+            timestamp = int(datetime.now().timestamp())
+            screenshots_dir = os.path.join('temp', 'screenshots', f'book_{timestamp}')
+            os.makedirs(screenshots_dir, exist_ok=True)
             
-            # Wait for the page to load
-            await page.wait_for_timeout(5000)
+            print(f"PROGRESS:{json.dumps({'step_id': 'init', 'description': f'📂 Screenshots directory: {screenshots_dir}', 'status': 'completed'})}")
+            print(f"PROGRESS:{json.dumps({'step_id': 'setup', 'description': f'📖 Extracting pages from: {book_title} by {book_author}', 'status': 'running'})}")
+            print(f"PROGRESS:{json.dumps({'step_id': 'url', 'description': f'🔗 URL: {preview_url}', 'status': 'completed'})}")
             
-            # Try to close any popups or accept cookies
+            try:
+                print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigating to Google Books preview...', 'status': 'running'})}")
+                await page.goto(preview_url, wait_until='networkidle')
+                
+                # Wait for the page to load
+                await page.wait_for_timeout(5000)
+                
+                # Try to close any popups or accept cookies
             try:
                 close_buttons = await page.query_selector_all('button:has-text("No thanks"), button:has-text("Got it"), button:has-text("Accept"), [aria-label*="close"], .modal-close')
                 for button in close_buttons[:2]:  # Close first 2 popups max
