@@ -1,153 +1,135 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-// Use global storage to share state between API routes
-declare global {
-  var automationStatusStore: Map<string, any>
-}
-
-if (!global.automationStatusStore) {
-  global.automationStatusStore = new Map()
-}
+import { spawn } from 'child_process'
+import path from 'path'
 
 export async function POST(request: NextRequest) {
   try {
-    const { bookTitle, bookAuthor, genre, previewUrl } = await request.json()
+    const { bookTitle, bookAuthor, previewUrl } = await request.json()
+
+    if (!bookTitle || !bookAuthor) {
+      return NextResponse.json(
+        { error: 'Book title and author are required' },
+        { status: 400 }
+      )
+    }
+
+    if (!previewUrl) {
+      return NextResponse.json(
+        { error: 'Preview URL is required for page extraction' },
+        { status: 400 }
+      )
+    }
+
+    // Create a readable stream for Server-Sent Events
+    const encoder = new TextEncoder()
     
-    // Generate unique automation ID
-    const automationId = `automation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
-    // Initialize status
-    global.automationStatusStore.set(automationId, {
-      status: 'running',
-      progress: 'Initializing automation...',
-      result: null,
-      error: null,
-      url: previewUrl || '',
-      screenshot: ''
+    const stream = new ReadableStream({
+      start(controller) {
+        // Path to the new Playwright script
+        const scriptPath = path.join(process.cwd(), 'playwright_book_extractor.py')
+        
+        // Use the Python interpreter from the virtual environment directly
+        const pythonPath = path.join(process.cwd(), 'browser_env', 'bin', 'python')
+        const pythonProcess = spawn(pythonPath, [scriptPath, previewUrl, bookTitle, bookAuthor], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env },
+          cwd: process.cwd()
+        })
+
+        // Handle stdout data (progress updates and results)
+        pythonProcess.stdout.on('data', (data) => {
+          const output = data.toString().trim()
+          const lines = output.split('\n')
+          
+          for (const line of lines) {
+            if (line.startsWith('PROGRESS:')) {
+              const progressData = line.replace('PROGRESS:', '')
+              try {
+                const progress = JSON.parse(progressData)
+                const sseData = `data: ${JSON.stringify({
+                  type: 'progress',
+                  ...progress
+                })}\n\n`
+                controller.enqueue(encoder.encode(sseData))
+              } catch (e) {
+                console.error('Failed to parse progress data:', e)
+              }
+            } else if (line.startsWith('RESULT:')) {
+              const resultData = line.replace('RESULT:', '')
+              try {
+                const result = JSON.parse(resultData)
+                const sseData = `data: ${JSON.stringify({
+                  type: 'result',
+                  ...result
+                })}\n\n`
+                controller.enqueue(encoder.encode(sseData))
+              } catch (e) {
+                console.error('Failed to parse result data:', e)
+              }
+            } else if (line.startsWith('ERROR:')) {
+              const errorData = line.replace('ERROR:', '')
+              const sseData = `data: ${JSON.stringify({
+                type: 'error',
+                error: errorData
+              })}\n\n`
+              controller.enqueue(encoder.encode(sseData))
+            }
+          }
+        })
+
+        // Handle stderr data (errors)
+        pythonProcess.stderr.on('data', (data) => {
+          const error = data.toString().trim()
+          console.error('Python script error:', error)
+          const sseData = `data: ${JSON.stringify({
+            type: 'error',
+            error: error
+          })}\n\n`
+          controller.enqueue(encoder.encode(sseData))
+        })
+
+        // Handle process completion
+        pythonProcess.on('close', (code) => {
+          console.log(`Python script exited with code ${code}`)
+          const sseData = `data: ${JSON.stringify({
+            type: 'complete',
+            exitCode: code
+          })}\n\n`
+          controller.enqueue(encoder.encode(sseData))
+          controller.close()
+        })
+
+        // Handle process errors
+        pythonProcess.on('error', (err) => {
+          console.error('Failed to start Python script:', err)
+          const sseData = `data: ${JSON.stringify({
+            type: 'error',
+            error: `Failed to start automation: ${err.message}`
+          })}\n\n`
+          controller.enqueue(encoder.encode(sseData))
+          controller.close()
+        })
+      }
     })
 
-    // Start automation in background
-    startBackgroundAutomation(automationId, { bookTitle, bookAuthor, genre, previewUrl })
-
-    return NextResponse.json({ 
-      automation_id: automationId,
-      status: 'started'
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
     })
+
   } catch (error) {
-    console.error('Browser automation error:', error)
+    console.error('Browser automation API error:', error)
     return NextResponse.json(
-      { error: 'Failed to start automation' },
+      { error: 'Internal server error' },
       { status: 500 }
     )
   }
-}
-
-async function startBackgroundAutomation(
-  automationId: string, 
-  params: { bookTitle: string, bookAuthor: string, genre: string, previewUrl: string }
-) {
-  try {
-    // Update status to show we're connecting
-    global.automationStatusStore.set(automationId, {
-      ...global.automationStatusStore.get(automationId),
-      progress: 'Connecting to automation backend...'
-    })
-
-    // Call the Python backend automation endpoint with retry logic
-    const backendUrl = `http://localhost:${process.env.BACKEND_PORT || 5001}/start-automation`
-    
-    let lastError: Error | null = null
-    let response: Response | null = null
-    
-    // Retry connection up to 5 times with increasing delay
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      try {
-        console.log(`🔄 Attempting to connect to backend (attempt ${attempt}/5)...`)
-        
-        response = await fetch(backendUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            automation_id: automationId,
-            ...params
-          }),
-          // Add timeout
-          signal: AbortSignal.timeout(10000) // 10 second timeout
-        })
-
-        if (response.ok) {
-          console.log('✅ Successfully connected to backend')
-          break
-        } else {
-          throw new Error(`Backend responded with status ${response.status}`)
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error))
-        console.log(`❌ Backend connection attempt ${attempt} failed:`, lastError.message)
-        
-        if (attempt < 5) {
-          // Wait before retrying (exponential backoff)
-          const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
-          console.log(`⏳ Waiting ${delay}ms before retry...`)
-          await new Promise(resolve => setTimeout(resolve, delay))
-          
-          // Update status to show retry
-          global.automationStatusStore.set(automationId, {
-            ...global.automationStatusStore.get(automationId),
-            progress: `Retrying connection to backend (attempt ${attempt + 1}/5)...`
-          })
-        }
-      }
-    }
-
-    if (!response || !response.ok) {
-      throw lastError || new Error('Failed to connect to backend after all retries')
-    }
-
-    const result = await response.json()
-    
-    // Update status with success
-    global.automationStatusStore.set(automationId, {
-      status: 'running',
-      progress: 'Automation started successfully',
-      result: null,
-      error: null,
-      url: params.previewUrl || '',
-      screenshot: ''
-    })
-
-    console.log(`✅ Automation ${automationId} started successfully`)
-
-  } catch (error) {
-    console.error('Background automation error:', error)
-    global.automationStatusStore.set(automationId, {
-      status: 'error',
-      progress: null,
-      result: null,
-      error: error instanceof Error ? error.message : String(error),
-      url: '',
-      screenshot: ''
-    })
-  }
-}
-
-// Endpoint to get automation status
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url)
-  const automationId = url.searchParams.get('id')
-  
-  if (!automationId) {
-    return NextResponse.json({ error: 'Missing automation ID' }, { status: 400 })
-  }
-
-  const status = global.automationStatusStore.get(automationId)
-  if (!status) {
-    return NextResponse.json({ error: 'Automation not found' }, { status: 404 })
-  }
-
-  return NextResponse.json(status)
 }
 
 export async function OPTIONS() {
@@ -155,7 +137,7 @@ export async function OPTIONS() {
     status: 200,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'POST',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
   })

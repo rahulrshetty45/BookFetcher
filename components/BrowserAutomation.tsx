@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
-import { getApiUrl } from '../lib/config'
+import io from 'socket.io-client'
+import { getApiUrl, getSocketUrl } from '../lib/config'
 
 interface BrowserAutomationProps {
   isVisible: boolean
@@ -20,15 +21,6 @@ interface SelectedPageContent {
   reasoning: string
 }
 
-interface AutomationStatus {
-  status: 'connecting' | 'running' | 'completed' | 'error'
-  progress?: any
-  result?: any
-  error?: string
-  url?: string
-  screenshot?: string
-}
-
 export default function BrowserAutomation({
   isVisible,
   onClose,
@@ -38,6 +30,7 @@ export default function BrowserAutomation({
   previewUrl,
   onAutomationComplete
 }: BrowserAutomationProps) {
+  const [socket, setSocket] = useState<any>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [currentUrl, setCurrentUrl] = useState<string>('')
   const [currentScreenshot, setCurrentScreenshot] = useState<string>('')
@@ -46,150 +39,53 @@ export default function BrowserAutomation({
   const [hasStartedAutomation, setHasStartedAutomation] = useState(false)
   const [automationResult, setAutomationResult] = useState<any>(null)
   const [selectedPageContent, setSelectedPageContent] = useState<SelectedPageContent | null>(null)
-  const [automationId, setAutomationId] = useState<string | null>(null)
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const isStartingRef = useRef(false) // Prevent multiple simultaneous starts
 
   useEffect(() => {
-    if (!isVisible) {
-      // Reset all state when component becomes invisible
-      setIsConnected(false)
-      setHasStartedAutomation(false)
-      setIsAutomating(false)
-      setAutomationId(null)
-      setAutomationResult(null)
-      setCurrentUrl('')
-      setCurrentScreenshot('')
-      isStartingRef.current = false
-      
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
-      }
-      return
-    }
+    if (!isVisible) return
 
-    // Simulate connection for UI
-    setIsConnected(true)
-    console.log('✅ Connected to backend')
+    // Initialize socket connection
+    const newSocket = io(getSocketUrl(), {
+      transports: ['websocket'],
+      upgrade: false
+    })
+
+    setSocket(newSocket)
+
+    newSocket.on('connect', () => {
+      console.log('✅ Connected to Python backend')
+      setIsConnected(true)
+    })
+
+    newSocket.on('disconnect', () => {
+      console.log('❌ Disconnected from Python backend')
+      setIsConnected(false)
+    })
+
+    newSocket.on('automation_progress', handleProgressEvent)
+    newSocket.on('automation_complete', handleCompletionEvent)
+    newSocket.on('automation_error', handleErrorEvent)
 
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
-      }
+      newSocket.disconnect()
     }
   }, [isVisible])
 
   useEffect(() => {
-    // Only start automation if we have all required data and haven't started yet
-    if (isConnected && previewUrl && !hasStartedAutomation && !isStartingRef.current) {
+    if (socket && isConnected && previewUrl && !hasStartedAutomation) {
       console.log('🚀 Starting automation with preview URL:', previewUrl)
       setHasStartedAutomation(true)
       setIsAutomating(true)
-      startAutomation()
-    }
-  }, [isConnected, previewUrl, hasStartedAutomation]) // Removed dynamic dependencies
-
-  const startAutomation = async () => {
-    if (isStartingRef.current) {
-      console.log('⚠️ Automation already starting, skipping...')
-      return
-    }
-
-    isStartingRef.current = true
-
-    try {
-      // Clear any existing polling
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
-      }
-
-      console.log('🔄 Starting new automation...')
-      const response = await fetch(getApiUrl('browser-automation'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          bookTitle: bookTitle,
-          bookAuthor: bookAuthor,
-          genre: genre || 'Unknown',
-          previewUrl: previewUrl
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log('✅ Automation response:', result)
       
-      if (result.automation_id) {
-        setAutomationId(result.automation_id)
-        console.log('📋 Starting polling for automation ID:', result.automation_id)
-        startPolling(result.automation_id)
-      } else {
-        // If automation completes immediately
-        handleCompletionEvent(result)
-      }
-    } catch (error) {
-      console.error('❌ Automation start error:', error)
-      handleErrorEvent({ error: error instanceof Error ? error.message : String(error) })
-    } finally {
-      isStartingRef.current = false
+      socket.emit('start_automation', {
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        genre: genre || 'Unknown',
+        previewUrl: previewUrl
+      })
     }
-  }
-
-  const startPolling = (pollingAutomationId: string) => {
-    // Clear any existing polling first
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-    }
-
-    console.log('🔍 Starting polling for automation ID:', pollingAutomationId)
-    
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        console.log('📡 Polling automation status for ID:', pollingAutomationId)
-        const response = await fetch(getApiUrl(`automation-status/${pollingAutomationId}`))
-        
-        if (!response.ok) {
-          console.log(`❌ Polling failed with status ${response.status} for ID:`, pollingAutomationId)
-          return
-        }
-
-        const status: AutomationStatus = await response.json()
-        console.log('📊 Automation status:', status)
-        
-        if (status.url) {
-          setCurrentUrl(status.url)
-        }
-        
-        if (status.screenshot) {
-          setCurrentScreenshot(status.screenshot)
-        }
-
-        if (status.status === 'completed') {
-          console.log('✅ Automation completed!')
-          clearInterval(pollingIntervalRef.current!)
-          pollingIntervalRef.current = null
-          handleCompletionEvent(status.result)
-        } else if (status.status === 'error') {
-          console.log('❌ Automation failed:', status.error)
-          clearInterval(pollingIntervalRef.current!)
-          pollingIntervalRef.current = null
-          handleErrorEvent({ error: status.error })
-        }
-      } catch (error) {
-        console.error('Polling error:', error)
-      }
-    }, 2000) // Poll every 2 seconds
-  }
+  }, [socket, isConnected, previewUrl, bookTitle, bookAuthor, genre, hasStartedAutomation])
 
   const handleProgressEvent = (event: any) => {
     console.log('📈 Progress event:', event)

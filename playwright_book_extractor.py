@@ -11,6 +11,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 import json
 from datetime import datetime
+import pytesseract
 from PIL import Image
 import openai
 from dotenv import load_dotenv
@@ -21,25 +22,11 @@ from typing import Dict, List, Optional
 # Load environment variables
 load_dotenv()
 
-# Try to import pytesseract, provide fallback if not available
-try:
-    import pytesseract
-    TESSERACT_AVAILABLE = True
-    print("✅ Tesseract OCR is available")
-except ImportError as e:
-    TESSERACT_AVAILABLE = False
-    print(f"⚠️ Tesseract OCR not available: {e}")
-    print("📝 Will proceed without OCR functionality")
-
 # Initialize OpenAI client
 openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 def extract_text_from_image(image_path: str) -> str:
     """Extract text from image using OCR with noise filtering"""
-    if not TESSERACT_AVAILABLE:
-        print(f"⚠️ OCR not available for {image_path}, skipping text extraction")
-        return ""
-    
     try:
         image = Image.open(image_path)
         text = pytesseract.image_to_string(image)
@@ -198,75 +185,59 @@ async def send_screenshot_update(page, step_id: str, description: str):
             'status': 'running'
         })}")
 
-async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18) -> dict:
+async def extract_google_books_pages(preview_url: str, book_title: str, book_author: str, max_pages: int = 18):
     """
-    Extract pages from Google Books preview using Playwright automation.
+    Extract pages from Google Books preview using Playwright
+    
+    Args:
+        preview_url: Google Books preview URL
+        book_title: Title of the book
+        book_author: Author of the book
+        max_pages: Maximum number of pages to extract (default 18)
     """
-    print("🚀 Starting extract_google_books_pages function")
-    print(f"📖 Book: {book_title} by {book_author}")
-    print(f"🔗 URL: {preview_url}")
-    print(f"📄 Max pages: {max_pages}")
     
     # Create screenshots directory
-    screenshots_dir = os.path.join(os.getcwd(), 'temp', 'screenshots')
+    screenshots_dir = os.path.abspath("temp/screenshots")
     os.makedirs(screenshots_dir, exist_ok=True)
-    print(f"📂 Screenshots directory created: {screenshots_dir}")
+    
+    # Initialize list for parallel OCR tasks
+    ocr_tasks = []
     
     print(f"PROGRESS:{json.dumps({'step_id': 'init', 'description': f'📂 Screenshots directory: {screenshots_dir}', 'status': 'completed'})}")
     print(f"PROGRESS:{json.dumps({'step_id': 'setup', 'description': f'📖 Extracting pages from: {book_title} by {book_author}', 'status': 'running'})}")
     print(f"PROGRESS:{json.dumps({'step_id': 'url', 'description': f'🔗 URL: {preview_url}', 'status': 'completed'})}")
-
-    try:
-        print("🎭 Initializing Playwright...")
-        async with async_playwright() as p:
-            print("🎭 Playwright context created")
-            
-            # Launch browser
-            print("🌐 Launching browser...")
-            browser = await p.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-            )
-            print("🌐 Browser launched successfully")
-            
+    
+    async with async_playwright() as p:
+        # Launch browser in headless mode to avoid separate window
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            viewport={'width': 1400, 'height': 1180},  # Maximum viewport height for complete content capture
+            device_scale_factor=2  # High DPI for better quality screenshots
+        )
+        page = await context.new_page()
+        
+        try:
             print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigating to Google Books preview...', 'status': 'running'})}")
+            await page.goto(preview_url, wait_until='networkidle')
             
-            page = await browser.new_page()
-            print("📄 New page created")
+            # Wait for the page to load
+            await page.wait_for_timeout(5000)
             
-            # Set viewport
-            await page.set_viewport_size({"width": 1280, "height": 720})
-            print("📺 Viewport set to 1280x720")
-            
-            # Navigate to the URL
-            print(f"🔗 Navigating to: {preview_url}")
+            # Try to close any popups or accept cookies
             try:
-                await page.goto(preview_url, wait_until="networkidle", timeout=30000)
-                print("✅ Navigation completed successfully")
-            except Exception as nav_error:
-                print(f"❌ Navigation failed: {nav_error}")
-                raise nav_error
+                close_buttons = await page.query_selector_all('button:has-text("No thanks"), button:has-text("Got it"), button:has-text("Accept"), [aria-label*="close"], .modal-close')
+                for button in close_buttons[:2]:  # Close first 2 popups max
+                    await button.click()
+                    await page.wait_for_timeout(1000)
+            except:
+                pass
+            
+            # Send screenshot after page loads
+            await send_screenshot_update(page, 'navigation', '🌐 Google Books page loaded')
             
             print(f"PROGRESS:{json.dumps({'step_id': 'navigation', 'description': '🌐 Navigation completed', 'status': 'completed'})}")
             print(f"PROGRESS:{json.dumps({'step_id': 'detection', 'description': '📚 Starting Google Books reader...', 'status': 'running'})}")
-
-            # Wait for Google Books reader to load
-            print("⏳ Waiting for Google Books reader to load...")
-            try:
-                # Wait for book viewer
-                await page.wait_for_selector('[role="main"]', timeout=15000)
-                print("✅ Main content area found")
-                
-                # Look for embedded viewer
-                await page.wait_for_selector('iframe, .gb-viewer, [data-resource-type="books"]', timeout=10000)
-                print("✅ Book viewer elements detected")
-                
-            except Exception as load_error:
-                print(f"❌ Reader loading failed: {load_error}")
-                # Continue anyway, might still work
-                
-            print(f"PROGRESS:{json.dumps({'step_id': 'detection', 'description': '✅ Reader activated, waiting for content...', 'status': 'running'})}")
-
+            
             # Try to activate the Google Books reader by clicking on preview elements
             try:
                 # Look for preview/read buttons or cover image to start the reader
@@ -642,19 +613,6 @@ async def extract_google_books_pages(preview_url: str, book_title: str, book_aut
 
 async def extract_text_from_image_async(image_path: str) -> dict:
     """Extract text from image using OCR with noise filtering - async version"""
-    # Extract page number from filename
-    filename = os.path.basename(image_path)
-    page_num = int(filename.split('_')[1].split('.')[0])
-    
-    if not TESSERACT_AVAILABLE:
-        print(f"⚠️ OCR not available for {image_path}, returning empty text")
-        return {
-            "page_number": page_num,
-            "filename": filename,
-            "text": "",
-            "text_length": 0
-        }
-    
     loop = asyncio.get_event_loop()
     
     def run_ocr():
@@ -670,6 +628,10 @@ async def extract_text_from_image_async(image_path: str) -> dict:
     # Run OCR in thread pool to avoid blocking
     with concurrent.futures.ThreadPoolExecutor() as executor:
         text = await loop.run_in_executor(executor, run_ocr)
+    
+    # Extract page number from filename
+    filename = os.path.basename(image_path)
+    page_num = int(filename.split('_')[1].split('.')[0])
     
     return {
         "page_number": page_num,
